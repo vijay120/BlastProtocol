@@ -2,14 +2,11 @@ import socket
 import base64
 import sys
 from select import select
-<<<<<<< HEAD
 from threading import Thread, Event, Timer
-=======
-from threading import Thread, Timer
->>>>>>> 60b92298b86fd780ea409627a4b39c75afdf889e
 import time
+import select
 
-UDP_PORT = 4019
+UDP_PORT = 4046
 UDP_IP = "127.0.0.1"
 
 PROTO = "prot"
@@ -17,6 +14,10 @@ NODATA = ""
 DATA = 2
 SIZEOFBYTE = 8
 NUMFRAGS = 32
+RETRYATTEMPTS = 0
+
+
+globalIsOver = False
 
 def hello():
     print "hello, world"
@@ -51,6 +52,15 @@ def decode_fragment(fragment):
 				"Data": Data
 			}
 
+def printFragmentDict(Dict):
+	print str(Dict["MessageId"]) + ", " + str(Dict["FragMask"] + 1) + " of " + str(Dict["NumFrags"]) + " : " + Dict["Data"]
+
+def checkAllFragArrived(list):
+
+	for truth in list:
+		if truth == False:
+			return False
+	return True
 
 def sender():
 
@@ -58,10 +68,11 @@ def sender():
  	
  	# step 1
  	for i in range(0, NUMFRAGS):
- 		MessageId = 1
- 		Length = 100
- 		fragment = fragment_factory(MessageId, Length, NUMFRAGS, 2, i, "Hello: " + str(i))
- 		sockSend.sendto(fragment, (UDP_IP, UDP_PORT))
+ 		if i != 5:
+ 			MessageId = 1
+ 			Length = 100
+ 			fragment = fragment_factory(MessageId, Length, NUMFRAGS, 2, i, "Hello: " + str(i))
+ 			sockSend.sendto(fragment, (UDP_IP, UDP_PORT))
 
 	sockSend.close()
 	print "sender closed"
@@ -72,39 +83,94 @@ def receiver():
 	sockRec.bind((UDP_IP, UDP_PORT))
 	received = False
 	counter = 0
-	ListOfMessages = []
+	attempts = 0
+	potentialRead = [sockRec]
 
-	while (counter < 32):
-		data, addr = sockRec.recvfrom(65535)
-		print "received message:", data
-		ListOfMessages.append(data)
-		counter = counter+1
-		print counter
+	lastFragTimer = TimerReset(10, lastFragExpired)
+	retryTimer = TimerReset(5, retryExpired)
+	#ListOfMessages = []
 
-	FirstProto = decode_fragment(ListOfMessages[0])["Proto"]
-	FirstMid = decode_fragment(ListOfMessages[0])["MessageId"]
-	NumFrags = decode_fragment(ListOfMessages[0])["NumFrags"]
+	FirstProto = 0
+	FirstMid = 0
 
 	bitFragsArrived = []
-	for i in range(0, NumFrags):
+	for i in range(0, NUMFRAGS):
 		bitFragsArrived.append(False)
 
-	for data in ListOfMessages:
+	while (not globalIsOver):
+		ready_to_read, dont_care, don_care = select.select(potentialRead, [],[],1)
+		if (len(ready_to_read) == 1):
+			print ready_to_read
+			data, addr = sockRec.recvfrom(65535)
+			ready_to_read = None
+			print "received message:", data
+			counter = counter + 1
 
-		Dict = decode_fragment(data)
+			#Decode Fragment
+			thisFrag = decode_fragment(data)
 
-		if Dict["Proto"] != FirstProto:
-			print "invalid message"
+			#Check that it's a valid fragment
+			if thisFrag["PacketType"] != DATA:
+				print "invalid fragment"
+				break
 
-		if Dict["MessageId"] != FirstMid:
-			print "invalid message"
+			#Print contents of Fragment
+			printFragmentDict(thisFrag)
 
-		if Dict["PacketType"] != DATA:
-			print "invalid message"
+			fragIndex = thisFrag["FragMask"]
+			bitFragsArrived[fragIndex] = True
 
-		bitFragsArrived[Dict["FragMask"]] = True
+			#if this is the first fragment to arrive, save msg id
+			if counter == 1:
+				FirstProto = thisFrag["Proto"]
+				FirstMid = thisFrag["MessageId"]
+			else:
+				if thisFrag["Proto"] != FirstProto:
+					print "NOT THE SAME PROTOCOL!"
+					break
+				if thisFrag["MessageId"] != FirstMid:
+					print "NOT THE SAME MESSAGE ID!"
+					break
 
-		print str(Dict["MessageId"]) + ", " + str(Dict["FragMask"] + 1) + " of " + str(Dict["NumFrags"]) + " : " + Dict["Data"]
+			if fragIndex == 0:
+				lastFragTimer.start()
+				
+			if (fragIndex == 31) and (attempts == 0):
+				lastFragTimer.cancel()
+				attempts = 1
+				if checkAllFragArrived(bitFragsArrived) == False:
+					retryTimer.start()
+
+			if checkAllFragArrived(bitFragsArrived) == True:
+				retryTimer.cancel()
+				print "Yay all fragments arrived!"
+				break
+			#counter = counter+1
+
+			print counter
+
+	# FirstProto = decode_fragment(ListOfMessages[0])["Proto"]
+	# FirstMid = decode_fragment(ListOfMessages[0])["MessageId"]
+	# NumFrags = decode_fragment(ListOfMessages[0])["NumFrags"]
+
+
+
+	# for data in ListOfMessages:
+
+	# 	Dict = decode_fragment(data)
+
+	# 	if Dict["Proto"] != FirstProto:
+	# 		print "invalid message"
+
+	# 	if Dict["MessageId"] != FirstMid:
+	# 		print "invalid message"
+
+	# 	if Dict["PacketType"] != DATA:
+	# 		print "invalid message"
+
+	# 	bitFragsArrived[Dict["FragMask"]] = True
+
+	# 	print str(Dict["MessageId"]) + ", " + str(Dict["FragMask"] + 1) + " of " + str(Dict["NumFrags"]) + " : " + Dict["Data"]
 
 
 	sockRec.close()
@@ -171,6 +237,24 @@ class _TimerReset(Thread):
 #
 def hello():
     print "Time: %s - hello, world" % time.asctime()
+
+def lastFragExpired():
+	print "Last Frag Timer Expired"
+
+def retryExpired():
+	print "Retry Expired for the first time"
+	retryTimer = TimerReset(2, secondRetry)
+	retryTimer.start()
+
+def secondRetry():
+	print "Retry Expired for the second time"
+	retryTimer = TimerReset(2, lastRetry)
+	retryTimer.start()
+
+def lastRetry():
+	print "Retry Expired for the third/last time"
+	global globalIsOver
+	globalIsOver = True
 	
 if __name__ == "__main__":
 
@@ -179,18 +263,18 @@ if __name__ == "__main__":
 	sender = Thread(target=sender)
 	sender.start()
 
-	print "Time: %s - start..." % time.asctime()
-	tim = TimerReset(5, hello)
-	tim.start()
-	#print "Time: %s - sleeping for 4..." % time.asctime()
-	time.sleep (4)
-	tim.reset()
-	time.sleep(10)
-	tim = TimerReset(4,hello)
-	tim.start()
-	#print "Time: %s - sleeping for 10..." % time.asctime()
-	#time.sleep (10)
-	#print "Time: %s - end..." % time.asctime()
+	# print "Time: %s - start..." % time.asctime()
+	# tim = TimerReset(5, hello)
+	# tim.start()
+	# #print "Time: %s - sleeping for 4..." % time.asctime()
+	# time.sleep (4)
+	# tim.reset()
+	# time.sleep(10)
+	# tim = TimerReset(4,hello)
+	# tim.start()
+	# #print "Time: %s - sleeping for 10..." % time.asctime()
+	# #time.sleep (10)
+	# #print "Time: %s - end..." % time.asctime()
 
-	print "\n\n"
+	# print "\n\n"
 
