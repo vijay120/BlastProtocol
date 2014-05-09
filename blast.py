@@ -2,7 +2,11 @@ import socket
 import base64
 import sys
 from select import select
+<<<<<<< HEAD
 from threading import Thread, Event, Timer
+=======
+from threading import Thread, Timer
+>>>>>>> 60b92298b86fd780ea409627a4b39c75afdf889e
 import time
 
 UDP_PORT = 4019
@@ -13,6 +17,9 @@ NODATA = ""
 DATA = 2
 SIZEOFBYTE = 8
 NUMFRAGS = 32
+
+def hello():
+    print "hello, world"
 
 def fragment_factory(MessageId, DataLength, NumFrags, PacketType, FragMask, Data):
 	binProto = ''.join(format(ord(x), 'b') for x in PROTO) + "0000"
@@ -76,6 +83,11 @@ def receiver():
 
 	FirstProto = decode_fragment(ListOfMessages[0])["Proto"]
 	FirstMid = decode_fragment(ListOfMessages[0])["MessageId"]
+	NumFrags = decode_fragment(ListOfMessages[0])["NumFrags"]
+
+	bitFragsArrived = []
+	for i in range(0, NumFrags):
+		bitFragsArrived.append(False)
 
 	for data in ListOfMessages:
 
@@ -90,8 +102,10 @@ def receiver():
 		if Dict["PacketType"] != DATA:
 			print "invalid message"
 
+		bitFragsArrived[Dict["FragMask"]] = True
+
 		print str(Dict["MessageId"]) + ", " + str(Dict["FragMask"] + 1) + " of " + str(Dict["NumFrags"]) + " : " + Dict["Data"]
-		
+
 
 	sockRec.close()
 	print "receiver closed"
@@ -160,10 +174,10 @@ def hello():
 	
 if __name__ == "__main__":
 
-	#receiver = Thread(target=receiver)
-	#receiver.start()
-	#sender = Thread(target=sender)
-	#sender.start()
+	receiver = Thread(target=receiver)
+	receiver.start()
+	sender = Thread(target=sender)
+	sender.start()
 
 	print "Time: %s - start..." % time.asctime()
 	tim = TimerReset(5, hello)
@@ -179,3 +193,4 @@ if __name__ == "__main__":
 	#print "Time: %s - end..." % time.asctime()
 
 	print "\n\n"
+
