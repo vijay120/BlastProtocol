@@ -6,8 +6,8 @@ from threading import Thread, Event, Timer
 import time
 import select
 
-UDP_PORT_SENDER = 4500
-UDP_PORT_RECEIVER = 4501
+UDP_PORT_SENDER = 4504
+UDP_PORT_RECEIVER = 4505
 UDP_IP = "127.0.0.1"
 
 PROTO = "prot"
@@ -57,7 +57,7 @@ def printFragmentDict(Dict):
 def checkAllFragArrived(list):
 
 	for truth in list:
-		if truth == False:
+		if truth == '0':
 			return False
 	return True
 
@@ -68,10 +68,12 @@ def sender():
 
  	# step 1
  	for i in range(0, NUMFRAGS):
- 		MessageId = 1
- 		Length = 100
- 		fragment = fragment_factory(MessageId, Length, NUMFRAGS, DATA, '{0:032b}'.format(1 << i), "Hello: " + str(i))
- 		sockSend.sendto(fragment, (UDP_IP, UDP_PORT_RECEIVER))
+ 		#Test retry time out (WORKS!)
+ 		if (i != 5):
+	 		MessageId = 1
+	 		Length = 100
+	 		fragment = fragment_factory(MessageId, Length, NUMFRAGS, DATA, '{0:032b}'.format(1 << i), "Hello: " + str(i))
+	 		sockSend.sendto(fragment, (UDP_IP, UDP_PORT_RECEIVER))
 
  		#added
  	data, addr = sockSend.recvfrom(65535)
@@ -100,7 +102,7 @@ def receiver():
 
 	bitFragsArrived = []
 	for i in range(0, NUMFRAGS):
-		bitFragsArrived.append(False)
+		bitFragsArrived.append('0')
 
 	while (not globalIsOver):
 		ready_to_read, dont_care, don_care = select.select(potentialRead, [],[],1)
@@ -123,7 +125,7 @@ def receiver():
 			printFragmentDict(thisFrag)
 
 			fragIndex = thisFrag["FragMask"]
-			bitFragsArrived[fragIndex] = True
+			bitFragsArrived[fragIndex] = '1'
 
 			#if this is the first fragment to arrive, save msg id
 			if counter == 1:
