@@ -143,7 +143,6 @@ def receiver():
 	while (not globalIsOver):
 		ready_to_read, dont_care, don_care = select.select(potentialRead, [],[],1)
 		if (len(ready_to_read) == 1):
-			print ready_to_read
 			data, addr = sockRec.recvfrom(65535)
 			ready_to_read = None
 			print "received message:", data
@@ -158,7 +157,9 @@ def receiver():
 				break
 
 			#Print contents of Fragment
+			print "Contents of this Fragment is: "
 			printFragmentDict(thisFrag)
+			print "\n"
 
 			fragIndex = thisFrag["FragMask"]
 			bitFragsArrived[fragIndex] = '1'
@@ -190,11 +191,7 @@ def receiver():
 			if checkAllFragArrived(bitFragsArrived) == True:
 				print "Yay all fragments arrived!"
 				break
-			#counter = counter+1
 
-			print counter
-
-		print "SendSRR is" + str(sendSRR)
 		if (sendSRR):
 			#Reset send signal 
 			sendSRR = False
@@ -290,6 +287,7 @@ def secondRetry():
 
 def lastRetry():
 	print "Retry Expired for the third/last time"
+	print "GIVE UP BLAST SESSION!!!"
 	global globalIsOver
 	globalIsOver = True
 	
