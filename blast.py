@@ -90,6 +90,7 @@ def sender():
  	for i in range(0, NUMFRAGS):
  		#Test retry time out (WORKS!)
  		if (i != 4):
+ 			if (i != 5):
 		 		fragment = fragment_factory(MessageId, Length, NUMFRAGS, DATA, '{0:032b}'.format(1 << i), "Hello: " + str(i))
 		 		sockSend.sendto(fragment, (UDP_IP, UDP_PORT_RECEIVER))
 
@@ -106,8 +107,9 @@ def sender():
  			listOfMissingFrags = SRRdecoder(data)
  			for missing in listOfMissingFrags:
  				print "Missing Fragment Number:" + str(missing)
- 				fragment = fragment_factory(MessageId, Length, NUMFRAGS, DATA, '{0:032b}'.format(1 << missing), "Hello: " + str(i))
- 				sockSend.sendto(fragment, (UDP_IP, UDP_PORT_RECEIVER))
+ 				if (missing != 5):
+	 				fragment = fragment_factory(MessageId, Length, NUMFRAGS, DATA, '{0:032b}'.format(1 << missing), "Hello: " + str(i))
+	 				sockSend.sendto(fragment, (UDP_IP, UDP_PORT_RECEIVER))
  			
 
 
