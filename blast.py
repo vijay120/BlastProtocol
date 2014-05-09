@@ -50,8 +50,8 @@ def decode_fragment(fragment):
 	NumFrags = int(fragment[96:112], 2)
 	PacketType = int(fragment[112:128], 2)
 	FragMask = 31 - fragment[128:160].find('1')
-	print "fragment is: "
-	print fragment[160:]
+	# print "fragment is: "
+	# print fragment[160:]
 	Data = "".join(chr(int(fragment[i: i+8], 2)) for i in xrange(160, len(fragment), SIZEOFBYTE))
 
 	return {	"Proto": Proto,
@@ -84,12 +84,12 @@ def SRRdecoder(srr):
 def sender():
 	global DONE
 	readPorts = [sockSend]
+	MessageId = 1
+	Length = 100
  	# step 1
  	for i in range(0, NUMFRAGS):
  		#Test retry time out (WORKS!)
  		if (i != 4):
-		 		MessageId = 1
-		 		Length = 100
 		 		fragment = fragment_factory(MessageId, Length, NUMFRAGS, DATA, '{0:032b}'.format(1 << i), "Hello: " + str(i))
 		 		sockSend.sendto(fragment, (UDP_IP, UDP_PORT_RECEIVER))
 
@@ -99,11 +99,16 @@ def sender():
  		ready_to_read, dont_care, don_care = select.select(readPorts, [],[],1)
  		if (len(ready_to_read) == 1):
  			data, addr = sockSend.recvfrom(65535)
+
  			print "SRR states to send fragments: "
+
+ 			#find out which fragments need resending
  			listOfMissingFrags = SRRdecoder(data)
  			for missing in listOfMissingFrags:
  				print "Missing Fragment Number:" + str(missing)
- 			#find out which fragments need resending
+ 				fragment = fragment_factory(MessageId, Length, NUMFRAGS, DATA, '{0:032b}'.format(1 << missing), "Hello: " + str(i))
+ 				sockSend.sendto(fragment, (UDP_IP, UDP_PORT_RECEIVER))
+ 			
 
 
  		if (DONE):
@@ -155,6 +160,9 @@ def receiver():
 
 			fragIndex = thisFrag["FragMask"]
 			bitFragsArrived[fragIndex] = '1'
+			print "bitFragsArrived:"
+			print bitFragsArrived
+			print fragIndex
 
 			#if this is the first fragment to arrive, save msg id
 			if counter == 1:
