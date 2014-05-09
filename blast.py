@@ -3,24 +3,58 @@ import base64
 import sys
 from select import select
 from threading import Thread
+import time
 
-UDP_PORT = 5005
+UDP_PORT = 4019
 UDP_IP = "127.0.0.1"
 
-def sender():
-	protnum = "four"
-	midField = "000000000000000000000000000000"
-	lengthField = "000000000000000000000000000000"
-	NumFrags = "0000000000000000"
-	typeField = "0000000000000000"
-	fragMaskField = "000000000000000000000000000000"
-		
-	MESSAGE = protnum + midField + lengthField + NumFrags + typeField + fragMaskField
-		
-	sockSend = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+PROTO = "prot"
+NODATA = ""
+DATA = 2
+SIZEOFBYTE = 8
+NUMFRAGS = 32
 
-	for i in range(0,100):
-		sockSend.sendto(MESSAGE, (UDP_IP, UDP_PORT))
+def fragment_factory(MessageId, DataLength, NumFrags, PacketType, FragMask, Data):
+	binProto = ''.join(format(ord(x), 'b') for x in PROTO) + "0000"
+	binMessageId = '{0:032b}'.format(MessageId)
+	binDataLength = '{0:032b}'.format(DataLength)
+	binNumFrags = '{0:016b}'.format(NumFrags)
+	binPacketType = '{0:016b}'.format(PacketType)
+	binFragMask = '{0:032b}'.format(1 << FragMask)
+	binData = ''.join('{:08b}'.format(ord(c)) for c in Data)
+	return binProto + binMessageId + binDataLength + binNumFrags + binPacketType + binFragMask + binData
+
+def decode_fragment(fragment):
+	Proto = int(fragment[0:32], 2)
+	MessageId = int(fragment[32:64], 2)
+	DataLength = int(fragment[64:96], 2)
+	NumFrags = int(fragment[96:112], 2)
+	PacketType = int(fragment[112:128], 2)
+	FragMask = 31 - fragment[128:160].find('1')
+	print "fragment is: "
+	print fragment[160:]
+	Data = "".join(chr(int(fragment[i: i+8], 2)) for i in xrange(160, len(fragment), SIZEOFBYTE))
+
+	return {	"Proto": Proto,
+				"MessageId": MessageId,
+				"DataLength": DataLength,
+				"NumFrags": NumFrags,
+				"PacketType": PacketType,
+				"FragMask": FragMask,
+				"Data": Data
+			}
+
+
+def sender():
+
+	sockSend = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+ 	
+ 	# step 1
+ 	for i in range(0, NUMFRAGS):
+ 		MessageId = 1
+ 		Length = 100
+ 		fragment = fragment_factory(MessageId, Length, NUMFRAGS, 2, i, "Hello: " + str(i))
+ 		sockSend.sendto(fragment, (UDP_IP, UDP_PORT))
 
 	sockSend.close()
 	print "sender closed"
@@ -30,9 +64,34 @@ def receiver():
 	sockRec = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 	sockRec.bind((UDP_IP, UDP_PORT))
 	received = False
-	while (received == False):
-		data, addr = sockRec.recvfrom(1024)
+	counter = 0
+	ListOfMessages = []
+
+	while (counter < 32):
+		data, addr = sockRec.recvfrom(65535)
 		print "received message:", data
+		ListOfMessages.append(data)
+		counter = counter+1
+		print counter
+
+	FirstProto = decode_fragment(ListOfMessages[0])["Proto"]
+	FirstMid = decode_fragment(ListOfMessages[0])["MessageId"]
+
+	for data in ListOfMessages:
+
+		Dict = decode_fragment(data)
+
+		if Dict["Proto"] != FirstProto:
+			print "invalid message"
+
+		if Dict["MessageId"] != FirstMid:
+			print "invalid message"
+
+		if Dict["PacketType"] != DATA:
+			print "invalid message"
+
+		print str(Dict["MessageId"]) + ", " + str(Dict["FragMask"] + 1) + " of " + str(Dict["NumFrags"]) + " : " + Dict["Data"]
+		
 
 	sockRec.close()
 	print "receiver closed"
@@ -40,7 +99,7 @@ def receiver():
 	
 if __name__ == "__main__":
 
-	sender = Thread(target=sender)
-	sender.start()
 	receiver = Thread(target=receiver)
 	receiver.start()
+	sender = Thread(target=sender)
+	sender.start()
