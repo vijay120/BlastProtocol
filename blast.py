@@ -6,12 +6,14 @@ from threading import Thread, Event, Timer
 import time
 import select
 
-UDP_PORT = 4046
+UDP_PORT_SENDER = 4500
+UDP_PORT_RECEIVER = 4501
 UDP_IP = "127.0.0.1"
 
 PROTO = "prot"
 NODATA = ""
 DATA = 2
+SRC = 1
 SIZEOFBYTE = 8
 NUMFRAGS = 32
 RETRYATTEMPTS = 0
@@ -19,16 +21,13 @@ RETRYATTEMPTS = 0
 
 globalIsOver = False
 
-def hello():
-    print "hello, world"
-
 def fragment_factory(MessageId, DataLength, NumFrags, PacketType, FragMask, Data):
 	binProto = ''.join(format(ord(x), 'b') for x in PROTO) + "0000"
 	binMessageId = '{0:032b}'.format(MessageId)
 	binDataLength = '{0:032b}'.format(DataLength)
 	binNumFrags = '{0:016b}'.format(NumFrags)
 	binPacketType = '{0:016b}'.format(PacketType)
-	binFragMask = '{0:032b}'.format(1 << FragMask)
+	binFragMask = FragMask
 	binData = ''.join('{:08b}'.format(ord(c)) for c in Data)
 	return binProto + binMessageId + binDataLength + binNumFrags + binPacketType + binFragMask + binData
 
@@ -65,14 +64,20 @@ def checkAllFragArrived(list):
 def sender():
 
 	sockSend = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
- 	
+ 	sockSend.bind((UDP_IP, UDP_PORT_SENDER))
+
  	# step 1
  	for i in range(0, NUMFRAGS):
- 		if i != 5:
- 			MessageId = 1
- 			Length = 100
- 			fragment = fragment_factory(MessageId, Length, NUMFRAGS, 2, i, "Hello: " + str(i))
- 			sockSend.sendto(fragment, (UDP_IP, UDP_PORT))
+ 		MessageId = 1
+ 		Length = 100
+ 		fragment = fragment_factory(MessageId, Length, NUMFRAGS, DATA, '{0:032b}'.format(1 << i), "Hello: " + str(i))
+ 		sockSend.sendto(fragment, (UDP_IP, UDP_PORT_RECEIVER))
+
+ 		#added
+ 	data, addr = sockSend.recvfrom(65535)
+ 	print "at sender"
+ 	print data
+ 		#added
 
 	sockSend.close()
 	print "sender closed"
@@ -80,7 +85,7 @@ def sender():
 
 def receiver():
 	sockRec = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-	sockRec.bind((UDP_IP, UDP_PORT))
+	sockRec.bind((UDP_IP, UDP_PORT_RECEIVER))
 	received = False
 	counter = 0
 	attempts = 0
@@ -173,6 +178,14 @@ def receiver():
 	# 	print str(Dict["MessageId"]) + ", " + str(Dict["FragMask"] + 1) + " of " + str(Dict["NumFrags"]) + " : " + Dict["Data"]
 
 
+	FragMaskToSend = "".join(bitFragsArrived)
+	print FragMaskToSend
+
+	SrcMessage = fragment_factory(1, 100, 1, SRC, FragMaskToSend, "")
+	print SrcMessage
+
+	sockRec.sendto(SrcMessage, (UDP_IP, UDP_PORT_SENDER))
+
 	sockRec.close()
 	print "receiver closed"
 
@@ -257,10 +270,9 @@ def lastRetry():
 	globalIsOver = True
 	
 if __name__ == "__main__":
-
 	receiver = Thread(target=receiver)
-	receiver.start()
 	sender = Thread(target=sender)
+	receiver.start()
 	sender.start()
 
 	# print "Time: %s - start..." % time.asctime()
