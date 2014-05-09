@@ -6,8 +6,8 @@ from threading import Thread, Event, Timer
 import time
 import select
 
-UDP_PORT_SENDER = 4504
-UDP_PORT_RECEIVER = 4505
+UDP_PORT_SENDER = 45022
+UDP_PORT_RECEIVER = 4523
 UDP_IP = "127.0.0.1"
 
 PROTO = "prot"
@@ -16,10 +16,22 @@ DATA = 2
 SRC = 1
 SIZEOFBYTE = 8
 NUMFRAGS = 32
-RETRYATTEMPTS = 0
 
+DONE = False
 
+#Conditional for Receiver to end
 globalIsOver = False
+
+#Conditional for Sender to end
+globalSendEnd = False
+
+#Conditonal for whether to send SRR
+sendSRR = False
+
+sockSend = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sockSend.bind((UDP_IP, UDP_PORT_SENDER))
+sockRec = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sockRec.bind((UDP_IP, UDP_PORT_RECEIVER))
 
 def fragment_factory(MessageId, DataLength, NumFrags, PacketType, FragMask, Data):
 	binProto = ''.join(format(ord(x), 'b') for x in PROTO) + "0000"
@@ -61,24 +73,41 @@ def checkAllFragArrived(list):
 			return False
 	return True
 
+def SRRdecoder(srr):
+	srrFragMask = srr[128:160]
+	listOfMissingFrags = []
+	for i in range(0, NUMFRAGS):
+		if srrFragMask[i] == '0':
+			listOfMissingFrags.append(i)
+	return listOfMissingFrags
+
 def sender():
-
-	sockSend = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
- 	sockSend.bind((UDP_IP, UDP_PORT_SENDER))
-
+	global DONE
+	readPorts = [sockSend]
  	# step 1
  	for i in range(0, NUMFRAGS):
  		#Test retry time out (WORKS!)
- 		if (i != 5):
-	 		MessageId = 1
-	 		Length = 100
-	 		fragment = fragment_factory(MessageId, Length, NUMFRAGS, DATA, '{0:032b}'.format(1 << i), "Hello: " + str(i))
-	 		sockSend.sendto(fragment, (UDP_IP, UDP_PORT_RECEIVER))
+ 		if (i != 4):
+		 		MessageId = 1
+		 		Length = 100
+		 		fragment = fragment_factory(MessageId, Length, NUMFRAGS, DATA, '{0:032b}'.format(1 << i), "Hello: " + str(i))
+		 		sockSend.sendto(fragment, (UDP_IP, UDP_PORT_RECEIVER))
 
  		#added
- 	data, addr = sockSend.recvfrom(65535)
- 	print "at sender"
- 	print data
+
+ 	while (not globalSendEnd):
+ 		ready_to_read, dont_care, don_care = select.select(readPorts, [],[],1)
+ 		if (len(ready_to_read) == 1):
+ 			data, addr = sockSend.recvfrom(65535)
+ 			print "SRR states to send fragments: "
+ 			listOfMissingFrags = SRRdecoder(data)
+ 			for missing in listOfMissingFrags:
+ 				print "Missing Fragment Number:" + str(missing)
+ 			#find out which fragments need resending
+
+
+ 		if (DONE):
+ 			break
  		#added
 
 	sockSend.close()
@@ -86,14 +115,14 @@ def sender():
 
 
 def receiver():
-	sockRec = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-	sockRec.bind((UDP_IP, UDP_PORT_RECEIVER))
+	global sendSRR
+	global DONE
 	received = False
 	counter = 0
 	attempts = 0
 	potentialRead = [sockRec]
 
-	lastFragTimer = TimerReset(10, lastFragExpired)
+	lastFragTimer = TimerReset(5, lastFragExpired)
 	retryTimer = TimerReset(5, retryExpired)
 	#ListOfMessages = []
 
@@ -149,49 +178,24 @@ def receiver():
 					retryTimer.start()
 
 			if checkAllFragArrived(bitFragsArrived) == True:
-				retryTimer.cancel()
 				print "Yay all fragments arrived!"
 				break
 			#counter = counter+1
 
 			print counter
 
-	# FirstProto = decode_fragment(ListOfMessages[0])["Proto"]
-	# FirstMid = decode_fragment(ListOfMessages[0])["MessageId"]
-	# NumFrags = decode_fragment(ListOfMessages[0])["NumFrags"]
+		print "SendSRR is" + str(sendSRR)
+		if (sendSRR):
+			#Reset send signal 
+			sendSRR = False
 
+			FragMaskToSend = "".join(bitFragsArrived)
+			SrcMessage = fragment_factory(1, 100, 1, SRC, FragMaskToSend, "")
+			sockRec.sendto(SrcMessage, (UDP_IP, UDP_PORT_SENDER))
 
-
-	# for data in ListOfMessages:
-
-	# 	Dict = decode_fragment(data)
-
-	# 	if Dict["Proto"] != FirstProto:
-	# 		print "invalid message"
-
-	# 	if Dict["MessageId"] != FirstMid:
-	# 		print "invalid message"
-
-	# 	if Dict["PacketType"] != DATA:
-	# 		print "invalid message"
-
-	# 	bitFragsArrived[Dict["FragMask"]] = True
-
-	# 	print str(Dict["MessageId"]) + ", " + str(Dict["FragMask"] + 1) + " of " + str(Dict["NumFrags"]) + " : " + Dict["Data"]
-
-
-	FragMaskToSend = "".join(bitFragsArrived)
-	print FragMaskToSend
-
-	SrcMessage = fragment_factory(1, 100, 1, SRC, FragMaskToSend, "")
-	print SrcMessage
-
-	sockRec.sendto(SrcMessage, (UDP_IP, UDP_PORT_SENDER))
-
+	DONE = True
 	sockRec.close()
 	print "receiver closed"
-
-
 
 def TimerReset(*args, **kwargs):
     """ Global function for Timer """
@@ -254,17 +258,25 @@ def hello():
     print "Time: %s - hello, world" % time.asctime()
 
 def lastFragExpired():
+	retryTimer = TimerReset(2, retryExpired)
+	retryTimer.start()
+	global sendSRR
+	sendSRR = True
 	print "Last Frag Timer Expired"
 
 def retryExpired():
 	print "Retry Expired for the first time"
 	retryTimer = TimerReset(2, secondRetry)
 	retryTimer.start()
+	global sendSRR
+	sendSRR = True
 
 def secondRetry():
 	print "Retry Expired for the second time"
 	retryTimer = TimerReset(2, lastRetry)
 	retryTimer.start()
+	global sendSRR
+	sendSRR = True
 
 def lastRetry():
 	print "Retry Expired for the third/last time"
